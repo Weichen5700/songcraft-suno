@@ -1,0 +1,18 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {parseCreativeResponse,defaultBrief,createProject,snapshotTrack,preserveVersion,transferTrack,buildPrompt,safeName} from '../dist/core.js';
+import {makeZip,readZip,crc32} from '../dist/archive.js';
+import {validateTransfer,isSunoUrl} from '../extension/contract.js';
+const song={title:'雨後的光',lyrics:'[Verse]\n走過雨季',style:'warm mandopop',voice:'女聲',instrumental:false};
+const creative={title:'記得回家',concept:'溫暖的故事',sharedStyle:'piano',tracks:[song]};
+test('外部 AI JSON：中文與程式區塊可解析；壞資料不接受',()=>{assert.equal(parseCreativeResponse('```json\n'+JSON.stringify(creative)+'\n```').tracks[0].lyrics,song.lyrics);for(const data of ['no',null,[],{tracks:[]},{title:'x',tracks:[{title:'x'}]}])assert.throws(()=>parseCreativeResponse(data));});
+test('版本是獨立快照，修改與還原不連動',()=>{const p=createProject({...defaultBrief(),idea:'回家的歌'},creative),t=p.tracks[0],a=snapshotTrack(t);t.lyrics='新歌詞';assert.equal(a.lyrics,song.lyrics);assert.equal(transferTrack(t).lyrics,'新歌詞');assert.equal(Object.hasOwn(transferTrack(t),'apiKey'),false);});
+test('專輯提示詞有曲數、共通風格、代表曲與 JSON 格式',()=>{const prompt=buildPrompt({...defaultBrief(),mode:'album',count:3,idea:'人生三階段'});assert.match(prompt,/固定 3 首/);assert.match(prompt,/第一首作為試作/);assert.match(prompt,/sharedStyle/);});
+test('ZIP 中文與二進位可完整往返，損壞被拒絕',async()=>{const entries=[{name:'01_雨後.png',data:new Uint8Array([0,1,255,34])},{name:'project.json',data:'{"title":"你好"}'}];const zip=await makeZip(entries),decoded=await readZip(zip);assert.deepEqual(decoded.get(entries[0].name),entries[0].data);assert.equal(new TextDecoder().decode(decoded.get('project.json')),entries[1].data);const bytes=new Uint8Array(await zip.arrayBuffer());bytes[30+new TextEncoder().encode(entries[0].name).length]^=1;await assert.rejects(()=>readZip(new Blob([bytes])),/損壞/);});
+test('CRC32 標準向量',()=>assert.equal(crc32(new TextEncoder().encode('123456789')),0xcbf43926));
+test('匯出檔名移除路徑與保留中文',()=>assert.equal(safeName('../雨:天?.'),'.._雨_天_'));
+test('擴充套件契約不接受錯誤版本和過長欄位',()=>{const p=createProject({...defaultBrief(),idea:'回家'},creative),transfer=transferTrack(p.tracks[0]);assert.deepEqual(validateTransfer(JSON.stringify(transfer)),transfer);assert.throws(()=>validateTransfer({...transfer,version:2}));assert.throws(()=>validateTransfer({...transfer,lyrics:'x'.repeat(18001)}));assert.throws(()=>validateTransfer('['));});
+test('只允許真實 Suno HTTPS 網域',()=>{for(const u of ['https://suno.com/create','https://www.suno.com/create'])assert.equal(isSunoUrl(u),true);for(const u of ['http://suno.com','https://suno.com.evil.test','https://evil.test/?suno.com','javascript:alert(1)',''])assert.equal(isSunoUrl(u),false);});
+test('備份草稿允許空白歌名曲風，AI 創作回覆仍拒絕',()=>{const raw={...creative,tracks:[{...song,title:'',style:'',lyrics:'  尚未完成\n'}]};assert.throws(()=>parseCreativeResponse(raw));const draft=createProject({...defaultBrief(),idea:'草稿'},raw,{draft:true});assert.equal(draft.tracks[0].title,'');assert.equal(draft.tracks[0].lyrics,'  尚未完成\n');});
+test('所有新增版本入口的共用上限不會破壞既有版本',()=>{const track={...song,versions:Array.from({length:300},()=>({title:'舊版'}))};assert.throws(()=>preserveVersion(track,'改寫前'),/300/);assert.equal(track.versions.length,300);});
+test('Gemini Chat 模板的 %s 可重複代入，空白代入也不會遺失需求',()=>{const prompt='歌曲需求';const format=(template)=>template.includes('%s')?template.replaceAll('%s',prompt):`${template}\n\n${prompt}`;assert.equal(format('請處理：%s'),'請處理：歌曲需求');assert.equal(format('%s\n再次：%s'),'歌曲需求\n再次：歌曲需求');assert.match(format('我的固定指示'),/歌曲需求/);});

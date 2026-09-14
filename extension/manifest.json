@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "歌作 Suno 小幫手",
+  "version": "1.0.0",
+  "description": "從歌作貼入歌曲資料，協助填寫 Suno Custom 欄位。由你手動生成。",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "action": { "default_popup": "popup.html", "default_title": "歌作 Suno 小幫手" }
+}

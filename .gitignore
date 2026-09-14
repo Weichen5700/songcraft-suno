@@ -1,0 +1,7 @@
+.playwright-mcp/
+tests/artifacts/
+songcraft-home.png
+*.local
+*.key
+*.pem
+node_modules/
